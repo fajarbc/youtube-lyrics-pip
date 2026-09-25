@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>YouTube Lyrics PiP</title>
+    <link rel="icon" href="logo.png" />
+    <link rel="stylesheet" href="pip.css" />
+  </head>
+  <body>
+    <main class="player-shell">
+      <section class="panel" id="trackPanel">
+        <div class="panel-header">
+          <div class="panel-heading">
+            <img id="brandLogo" class="brand-logo" src="logo.png" alt="" />
+            <span class="panel-title">Now Playing</span>
+          </div>
+          <button
+            id="toggleTrack"
+            class="panel-toggle"
+            type="button"
+            aria-expanded="true"
+            aria-controls="trackBody"
+            aria-label="Hide song info"
+          >
+            <span class="chevron" aria-hidden="true"></span>
+          </button>
+        </div>
+        <div class="panel-body" id="trackBody">
+          <div class="panel-body-inner">
+            <div class="track-card">
+              <img id="artwork" class="artwork" alt="Album art" />
+              <div class="track-copy">
+                <div id="title" class="title">Waiting for a song…</div>
+                <div id="artist" class="artist">Open YouTube or YouTube Music</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel" id="transportPanel" aria-label="Playback controls">
+        <div class="panel-header">
+          <span class="panel-title">Controls</span>
+          <button
+            id="toggleTransport"
+            class="panel-toggle"
+            type="button"
+            aria-expanded="true"
+            aria-controls="transportBody"
+            aria-label="Hide controls"
+          >
+            <span class="chevron" aria-hidden="true"></span>
+          </button>
+        </div>
+        <div class="panel-body" id="transportBody">
+          <div class="panel-body-inner">
+            <div class="buttons">
+              <button id="backward" class="icon-button" type="button" aria-label="Rewind 10 seconds">−10</button>
+              <button id="toggle" class="play-button" type="button" aria-label="Play"></button>
+              <button id="forward" class="icon-button" type="button" aria-label="Forward 10 seconds">+10</button>
+            </div>
+
+            <input id="progress" type="range" min="0" max="100" step="0.1" value="0" aria-label="Song position" />
+            <div class="time-row">
+              <span id="currentTime">0:00</span>
+              <span id="duration">0:00</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="lyrics" class="lyrics" aria-live="polite">
+        <div id="lyricsStatus" class="lyrics-status">Connecting to YouTube…</div>
+      </section>
+    </main>
+  </body>
+</html>

@@ -1,0 +1,43 @@
+{
+  "manifest_version": 3,
+  "name": "YouTube Lyrics PiP",
+  "version": "1.0.0",
+  "description": "Mini player for YouTube/YouTube Music with synced lyrics in a Document Picture-in-Picture window.",
+  "permissions": ["tabs"],
+  "host_permissions": [
+    "*://*.youtube.com/*",
+    "https://lrclib.net/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "icons": {
+    "16": "logo.png",
+    "32": "logo.png",
+    "48": "logo.png",
+    "128": "logo.png"
+  },
+  "action": {
+    "default_title": "YouTube Lyrics PiP",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "logo.png",
+      "32": "logo.png",
+      "48": "logo.png",
+      "128": "logo.png"
+    }
+  },
+  "content_scripts": [
+    {
+      "matches": ["*://*.youtube.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["pip.html", "pip.css", "pip.js", "logo.png"],
+      "matches": ["*://*.youtube.com/*"]
+    }
+  ]
+}
