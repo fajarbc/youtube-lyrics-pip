@@ -250,6 +250,117 @@ input[type="range"]::-webkit-slider-thumb {
   scrollbar-color: #393d43 transparent;
 }
 
+.lyrics-panel {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  min-height: 0;
+  gap: 8px;
+}
+
+.lyrics-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 4px;
+}
+
+.search-button {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 50%;
+  color: var(--text);
+  background: var(--surface-2);
+  cursor: pointer;
+}
+
+.search-button span {
+  width: 11px;
+  height: 11px;
+  border: 2px solid currentColor;
+  border-radius: 50%;
+  position: relative;
+}
+
+.search-button span::after {
+  content: "";
+  position: absolute;
+  width: 6px;
+  height: 2px;
+  right: -5px;
+  bottom: -3px;
+  border-radius: 2px;
+  background: currentColor;
+  transform: rotate(45deg);
+}
+
+.search-panel {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 12px;
+  background: rgba(34, 37, 42, 0.9);
+}
+
+.search-form {
+  display: flex;
+  gap: 6px;
+}
+
+.search-form input {
+  min-width: 0;
+  flex: 1;
+  border: 1px solid #3b3f46;
+  border-radius: 8px;
+  padding: 7px 9px;
+  color: var(--text);
+  background: #151719;
+  outline: none;
+}
+
+.search-form input:focus { border-color: var(--accent); }
+
+.search-form button {
+  border: 0;
+  border-radius: 8px;
+  padding: 0 10px;
+  color: #061208;
+  background: var(--accent);
+  font-size: 12px;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.search-results {
+  display: grid;
+  gap: 5px;
+  max-height: 150px;
+  overflow-y: auto;
+}
+
+.search-result {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px 8px;
+  width: 100%;
+  border: 0;
+  border-radius: 8px;
+  padding: 7px 8px;
+  color: var(--text);
+  background: #292d33;
+  text-align: left;
+  cursor: pointer;
+}
+
+.search-result-title,
+.search-result-meta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.search-result-title { font-size: 12px; font-weight: 700; }
+.search-result-meta { color: var(--muted); font-size: 10px; }
+.search-result-badge { grid-row: 1 / 3; align-self: center; color: var(--accent); font-size: 10px; white-space: nowrap; }
+
 .lyric-line {
   margin: 0;
   padding: 8px 5px;

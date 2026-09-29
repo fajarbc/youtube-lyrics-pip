@@ -6,7 +6,8 @@
   "permissions": ["tabs"],
   "host_permissions": [
     "*://*.youtube.com/*",
-    "https://lrclib.net/*"
+    "https://lrclib.net/*",
+    "https://api.lyrics.ovh/*"
   ],
   "background": {
     "service_worker": "background.js"

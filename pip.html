@@ -70,8 +70,23 @@
         </div>
       </section>
 
-      <section id="lyrics" class="lyrics" aria-live="polite">
-        <div id="lyricsStatus" class="lyrics-status">Connecting to YouTube…</div>
+      <section class="lyrics-panel">
+        <div class="lyrics-toolbar">
+          <span class="panel-title">Lyrics</span>
+          <button id="searchLyrics" class="search-button" type="button" aria-label="Search lyrics" aria-expanded="false" title="Search lyrics">
+            <span aria-hidden="true"></span>
+          </button>
+        </div>
+        <div id="searchPanel" class="search-panel" hidden>
+          <form id="searchForm" class="search-form">
+            <input id="searchInput" type="search" autocomplete="off" placeholder="Title or artist" aria-label="Search lyrics by title or artist" />
+            <button type="submit">Search</button>
+          </form>
+          <div id="searchResults" class="search-results" aria-live="polite"></div>
+        </div>
+        <div id="lyrics" class="lyrics" aria-live="polite">
+          <div id="lyricsStatus" class="lyrics-status">Connecting to YouTube…</div>
+        </div>
       </section>
     </main>
   </body>

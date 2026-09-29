@@ -10,7 +10,7 @@
 
 A Google Chrome extension that opens a floating (Document Picture-in-Picture) mini player for YouTube and YouTube Music, showing time-synced lyrics fetched from LRCLIB alongside playback controls — so you can keep the lyrics on top of any window while browsing other tabs or apps.
 
-> 🔒 **Privacy first:** No account, no analytics, no server-side storage. The only external request this extension makes is sending the current song's title/artist/duration to [LRCLIB](https://lrclib.net) to look up lyrics.
+> 🔒 **Privacy first:** No account, no analytics, no server-side storage. The extension sends the current song's title/artist/duration to [LRCLIB](https://lrclib.net) and only uses [lyrics.ovh](https://lyrics.ovh) as a final plain-text fallback when LRCLIB has no result.
 
 **Copyright (c) 2026 Fajar BC — https://github.com/fajarbc**
 Licensed under the [MIT License](LICENSE).
@@ -25,6 +25,8 @@ Licensed under the [MIT License](LICENSE).
 - Floating **Document Picture-in-Picture** mini player that stays on top of other windows and tabs.
 - Auto-detects the currently playing song on YouTube or YouTube Music (title, artist, artwork, playback position).
 - Time-synced lyrics fetched from [LRCLIB](https://lrclib.net), with the current line highlighted in real time and a plain-text fallback when synced lyrics aren't available.
+- Fuzzy LRCLIB fallback search when exact metadata is imprecise, plus a PiP search picker for choosing another release with synced lyrics.
+- Last-resort plain-text lookup through [lyrics.ovh](https://lyrics.ovh) when LRCLIB has no matching track.
 - Remote playback controls (play/pause, ±10s seek, seek bar) that control the actual YouTube tab.
 - Collapsible "Now Playing" and "Controls" panels to give lyrics more room.
 - Automatically targets whichever open YouTube tab is currently playing, across multiple tabs.
@@ -74,6 +76,7 @@ Every push to `main` (and every manual GitHub Actions run) builds `youtube-lyric
 ### Using the floating player
 - Use **Play/Pause** and **±10s** to control playback on the YouTube tab remotely, or drag the seek bar to jump to a position.
 - Synced lyrics automatically scroll and highlight the current line as the song plays.
+- Use the search icon above the lyrics to edit the title or artist, compare LRCLIB candidates, and select a result manually.
 - Click the chevron on the **Now Playing** or **Controls** panel headers to collapse them and give the lyrics more vertical space.
 - The floating window stays on top of other windows and apps, even when you switch tabs.
 
@@ -83,5 +86,5 @@ Every push to `main` (and every manual GitHub Actions run) builds `youtube-lyric
 - **Chrome-only feature**: Document Picture-in-Picture requires a recent version of Google Chrome (or another Chromium-based browser that has shipped the API); it is not available in Firefox or Safari.
 - **Extension popup restriction**: Chrome does not allow `documentPictureInPicture.requestWindow()` to be called from an extension popup, side panel, or offscreen document — the window closes immediately if you try. This is why the trigger button lives on the YouTube page itself instead of in the extension popup (see [WICG/document-picture-in-picture#88](https://github.com/WICG/document-picture-in-picture/issues/88)).
 - **YouTube DOM/metadata changes**: Song title/artist detection primarily uses the Media Session API, with a DOM-scraping fallback for older/unsupported pages. Major YouTube layout changes could affect the fallback's accuracy.
-- **Lyrics availability**: Synced lyrics depend entirely on [LRCLIB](https://lrclib.net)'s community database; not every song has synced (or any) lyrics available.
+- **Lyrics availability**: Synced lyrics depend on [LRCLIB](https://lrclib.net)'s community database. When LRCLIB has no result, [lyrics.ovh](https://lyrics.ovh) may provide plain text only; it cannot provide synchronized lyrics.
 - **Single active session**: Only one YouTube tab can be actively controlled by the floating player at a time; the extension automatically prefers whichever tab is currently playing.

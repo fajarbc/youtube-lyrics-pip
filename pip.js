@@ -15,7 +15,12 @@
     currentTime: document.getElementById("currentTime"),
     duration: document.getElementById("duration"),
     lyrics: document.getElementById("lyrics"),
-    brandLogo: document.getElementById("brandLogo")
+    brandLogo: document.getElementById("brandLogo"),
+    searchLyrics: document.getElementById("searchLyrics"),
+    searchPanel: document.getElementById("searchPanel"),
+    searchForm: document.getElementById("searchForm"),
+    searchInput: document.getElementById("searchInput"),
+    searchResults: document.getElementById("searchResults")
   };
 
   elements.brandLogo?.addEventListener("error", () => elements.brandLogo.remove(), { once: true });
@@ -33,6 +38,7 @@
   let activeLyricIndex = -1;
   let loadedTrackKey = "";
   let lyricsRequestId = 0;
+  let searchRequestId = 0;
   let seeking = false;
 
   function handlePortMessage(event) {
@@ -208,6 +214,192 @@
     }
   }
 
+  function formatCandidateDuration(seconds) {
+    return Number.isFinite(Number(seconds)) && Number(seconds) > 0
+      ? formatTime(Number(seconds))
+      : "Unknown duration";
+  }
+
+  function candidateHasLyrics(candidate) {
+    return Boolean(candidate?.syncedLyrics?.trim() || candidate?.plainLyrics?.trim());
+  }
+
+  function normalizeMatch(value = "") {
+    return String(value)
+      .toLowerCase()
+      .replace(/[()[\]{}'"!?,.:;|/_-]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  function candidateScore(candidate, title, artist, duration) {
+    const candidateTitle = normalizeMatch(candidate.trackName);
+    const candidateArtist = normalizeMatch(candidate.artistName);
+    const wantedTitle = normalizeMatch(title);
+    const wantedArtist = normalizeMatch(artist);
+    let score = 0;
+
+    if (candidateTitle === wantedTitle) score += 100;
+    else if (candidateTitle.includes(wantedTitle) || wantedTitle.includes(candidateTitle)) score += 45;
+    if (wantedArtist && candidateArtist === wantedArtist) score += 75;
+    else if (wantedArtist && (candidateArtist.includes(wantedArtist) || wantedArtist.includes(candidateArtist))) score += 30;
+    if (candidateHasLyrics(candidate)) score += 20;
+    if (candidate.syncedLyrics?.trim()) score += 15;
+
+    const wantedDuration = Number(duration);
+    const resultDuration = Number(candidate.duration);
+    if (wantedDuration > 0 && resultDuration > 0) {
+      score += Math.max(0, 15 - Math.min(15, Math.abs(wantedDuration - resultDuration)));
+    }
+
+    return score;
+  }
+
+  function pickBestCandidate(candidates, nextState) {
+    return [...candidates]
+      .sort((first, second) => candidateScore(second, nextState.title, nextState.artist, nextState.duration)
+        - candidateScore(first, nextState.title, nextState.artist, nextState.duration))[0] || null;
+  }
+
+  async function searchLrclib(query) {
+    const params = new URLSearchParams({ q: query.trim() });
+    const response = await fetchLrclib(`https://lrclib.net/api/search?${params.toString()}`);
+
+    if (response.status === 429) throw new Error("LRCLIB rate limit exceeded. Please try again shortly.");
+    if (response.status >= 500) throw new Error("LRCLIB is temporarily unavailable. Please try again shortly.");
+    if (!response.ok) throw new Error(`LRCLIB responded with ${response.status}`);
+
+    const data = await response.json();
+    return Array.isArray(data) ? data : [];
+  }
+
+  function renderLyricsData(data) {
+    const parsed = parseLrc(data?.syncedLyrics || "");
+    if (parsed.length) {
+      syncedLyrics = parsed;
+      renderSyncedLyrics(parsed);
+      return true;
+    }
+    if (data?.plainLyrics?.trim()) {
+      renderPlainLyrics(data.plainLyrics);
+      return true;
+    }
+    return false;
+  }
+
+  async function fetchLyricsOvh(title, artist) {
+    if (!artist || artist === "Unknown artist") return "";
+    const url = `https://api.lyrics.ovh/v1/${encodeURIComponent(artist)}/${encodeURIComponent(title)}`;
+    const response = await fetch(url, { headers: { Accept: "application/json" } });
+    if (response.status === 404) return "";
+    if (!response.ok) throw new Error(`lyrics.ovh responded with ${response.status}`);
+    const data = await response.json();
+    return typeof data.lyrics === "string" ? data.lyrics.trim() : "";
+  }
+
+  function showSearchResults(candidates, requestId) {
+    if (requestId !== searchRequestId) return;
+    elements.searchResults.replaceChildren();
+
+    if (!candidates.length) {
+      const empty = document.createElement("div");
+      empty.className = "lyrics-status";
+      empty.textContent = "No LRCLIB matches found.";
+      elements.searchResults.appendChild(empty);
+      return;
+    }
+
+    const fragment = document.createDocumentFragment();
+    candidates.slice(0, 12).forEach((candidate) => {
+      const button = document.createElement("button");
+      button.className = "search-result";
+      button.type = "button";
+
+      const title = document.createElement("span");
+      title.className = "search-result-title";
+      title.textContent = candidate.trackName || "Unknown title";
+      const meta = document.createElement("span");
+      meta.className = "search-result-meta";
+      meta.textContent = `${candidate.artistName || "Unknown artist"} · ${candidate.albumName || "Unknown album"} · ${formatCandidateDuration(candidate.duration)}`;
+      const badge = document.createElement("span");
+      badge.className = "search-result-badge";
+      badge.textContent = candidate.syncedLyrics?.trim() ? "Synced" : candidate.plainLyrics?.trim() ? "Plain only" : "No lyrics";
+
+      button.append(title, meta, badge);
+      button.addEventListener("click", () => {
+        lyricsRequestId += 1;
+        syncedLyrics = [];
+        activeLyricIndex = -1;
+        if (!renderLyricsData(candidate)) setLyricsStatus("This result has no lyrics.", true);
+        closeSearchPanel();
+      });
+      fragment.appendChild(button);
+    });
+    elements.searchResults.appendChild(fragment);
+  }
+
+  async function runManualSearch() {
+    const query = elements.searchInput.value.trim();
+    const requestId = ++searchRequestId;
+    if (!query) {
+      elements.searchResults.replaceChildren();
+      return;
+    }
+
+    const status = document.createElement("div");
+    status.className = "lyrics-status";
+    status.textContent = "Searching LRCLIB…";
+    elements.searchResults.replaceChildren(status);
+
+    try {
+      const candidates = await searchLrclib(query);
+      showSearchResults(candidates, requestId);
+    } catch (error) {
+      if (requestId !== searchRequestId) return;
+      const failure = document.createElement("div");
+      failure.className = "lyrics-status error";
+      failure.textContent = error.message;
+      elements.searchResults.replaceChildren(failure);
+    }
+  }
+
+  async function loadFallbackLyrics(nextState, requestId) {
+    const candidates = await searchLrclib(
+      [nextState.title, nextState.artist]
+        .filter((value) => value && !value.startsWith("Unknown "))
+        .join(" ")
+    );
+    if (requestId !== lyricsRequestId) return true;
+
+    const candidate = pickBestCandidate(candidates, nextState);
+    if (candidate) {
+      if (renderLyricsData(candidate)) return true;
+      setLyricsStatus("LRCLIB found this track, but it has no lyrics.");
+      return true;
+    }
+
+    const lyrics = await fetchLyricsOvh(nextState.title, nextState.artist);
+    if (requestId !== lyricsRequestId) return true;
+    if (lyrics) renderPlainLyrics(lyrics);
+    else setLyricsStatus("Lyrics not found.");
+    return true;
+  }
+
+  function closeSearchPanel() {
+    elements.searchPanel.hidden = true;
+    elements.searchLyrics.setAttribute("aria-expanded", "false");
+  }
+
+  function toggleSearchPanel() {
+    const isOpen = !elements.searchPanel.hidden;
+    elements.searchPanel.hidden = isOpen;
+    elements.searchLyrics.setAttribute("aria-expanded", String(!isOpen));
+    if (!isOpen) {
+      elements.searchInput.value = [state.title, state.artist].filter(Boolean).join(" ");
+      elements.searchInput.focus();
+    }
+  }
+
   async function loadLyrics(nextState) {
     const requestId = ++lyricsRequestId;
     syncedLyrics = [];
@@ -235,7 +427,7 @@
       if (requestId !== lyricsRequestId) return;
 
       if (response.status === 404) {
-        setLyricsStatus("Lyrics not found.");
+        await loadFallbackLyrics(nextState, requestId);
         return;
       }
       if (response.status === 429) {
@@ -249,15 +441,7 @@
       const data = await response.json();
       if (requestId !== lyricsRequestId) return;
 
-      const parsed = parseLrc(data.syncedLyrics || "");
-      if (parsed.length) {
-        syncedLyrics = parsed;
-        renderSyncedLyrics(parsed);
-      } else if (data.plainLyrics?.trim()) {
-        renderPlainLyrics(data.plainLyrics);
-      } else {
-        setLyricsStatus("Lyrics not found.");
-      }
+      if (!renderLyricsData(data)) await loadFallbackLyrics(nextState, requestId);
     } catch (error) {
       if (requestId === lyricsRequestId) {
         setLyricsStatus(`Failed to fetch lyrics: ${error.message}`, true);
@@ -330,6 +514,11 @@
   elements.toggle.addEventListener("click", () => command("TOGGLE"));
   elements.backward.addEventListener("click", () => command("JUMP", -10));
   elements.forward.addEventListener("click", () => command("JUMP", 10));
+  elements.searchLyrics.addEventListener("click", toggleSearchPanel);
+  elements.searchForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    runManualSearch();
+  });
 
   function setupCollapsiblePanel(toggleId, bodyId) {
     const toggleButton = document.getElementById(toggleId);
