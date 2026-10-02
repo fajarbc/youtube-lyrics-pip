@@ -23,6 +23,7 @@
     searchForm: document.getElementById("searchForm"),
     searchInput: document.getElementById("searchInput"),
     searchResults: document.getElementById("searchResults"),
+    closeSearch: document.getElementById("closeSearch"),
     offsetEarlier: document.getElementById("offsetEarlier"),
     offsetLater: document.getElementById("offsetLater"),
     offsetValue: document.getElementById("offsetValue"),
@@ -541,9 +542,17 @@
     return true;
   }
 
+  function clearSearchResults() {
+    // Bumping the id also drops any search that's still in flight.
+    searchRequestId += 1;
+    elements.searchResults.replaceChildren();
+  }
+
   function closeSearchPanel() {
+    if (elements.searchPanel.hidden) return;
     elements.searchPanel.hidden = true;
     elements.searchLyrics.setAttribute("aria-expanded", "false");
+    clearSearchResults();
   }
 
   function toggleSearchPanel() {
@@ -758,6 +767,27 @@
   elements.searchForm.addEventListener("submit", (event) => {
     event.preventDefault();
     runManualSearch();
+  });
+  elements.closeSearch?.addEventListener("click", closeSearchPanel);
+
+  // Emptying the box (typing it away or the native clear "x") clears results.
+  elements.searchInput.addEventListener("input", () => {
+    if (!elements.searchInput.value.trim()) clearSearchResults();
+  });
+
+  // Escape closes the search panel from anywhere inside it.
+  elements.searchPanel.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape") return;
+    event.preventDefault();
+    closeSearchPanel();
+    elements.searchLyrics.focus();
+  });
+
+  // Clicking anywhere outside the panel (lyrics, controls) closes it too.
+  document.addEventListener("pointerdown", (event) => {
+    if (elements.searchPanel.hidden) return;
+    if (elements.searchPanel.contains(event.target) || elements.searchLyrics.contains(event.target)) return;
+    closeSearchPanel();
   });
 
   elements.offsetEarlier?.addEventListener("click", () => changeOffset(OFFSET_STEP_SECONDS));
