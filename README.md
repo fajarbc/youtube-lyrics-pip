@@ -29,15 +29,17 @@ Licensed under the [MIT License](LICENSE).
 - Last-resort plain-text lookup through [lyrics.ovh](https://lyrics.ovh) when LRCLIB has no matching track.
 - Remote playback controls (play/pause, ±10s seek, seek bar) that control the actual YouTube tab.
 - Collapsible "Now Playing" and "Controls" panels to give lyrics more room.
+- Optional **compact trigger button** that collapses the on-page "Lyrics PiP" button to just its icon.
+- The on-page trigger button **hides automatically in fullscreen** so it never covers the video.
 - Automatically targets whichever open YouTube tab is currently playing, across multiple tabs.
 
 ## Architecture
 - **Tech stack**: Vanilla HTML/CSS/JS, Manifest V3. No npm packages or bundlers required.
 - **`manifest.json`**: Extension manifest, permissions, and web-accessible resources.
 - **`background.js`**: Service worker that tracks playback state per tab, resolves which tab to control, and relays commands/state between the content script and the floating player.
-- **`content.js`**: Injected into YouTube/YouTube Music pages. Detects the video element and song metadata, executes playback commands, and hosts the floating trigger button that opens the Document Picture-in-Picture window. This has to run from the page itself rather than the extension popup — see [Limitations & Risks](#limitations--risks).
+- **`content.js`**: Injected into YouTube/YouTube Music pages. Detects the video element and song metadata, executes playback commands, and hosts the floating trigger button that opens the Document Picture-in-Picture window. The button reads the compact setting from `chrome.storage.sync` and hides itself while the page is fullscreen. This has to run from the page itself rather than the extension popup — see [Limitations & Risks](#limitations--risks).
 - **`pip.html` / `pip.css` / `pip.js`**: The floating player UI — artwork, title/artist, transport controls, seek bar, and the synced lyrics view. Runs inside the Document PiP window and talks back to `content.js` over a `MessageChannel` bridge, since the PiP window executes in a separate, unprivileged JS context with no direct extension API access.
-- **`popup.html` / `popup.js`**: Toolbar popup. Its only job is to highlight/scroll to the floating trigger button on the active YouTube tab, since Chrome does not allow opening a Document PiP window directly from a popup.
+- **`popup.html` / `popup.js`**: Toolbar popup. Highlights/scrolls to the floating trigger button on the active YouTube tab (Chrome does not allow opening a Document PiP window directly from a popup) and hosts the **Compact button** setting.
 
 ## Installation
 
@@ -72,6 +74,10 @@ Every push to `main` (and every manual GitHub Actions run) builds `youtube-lyric
 2. A floating **"🎵 Lyrics PiP"** button appears in the bottom-right corner of the page.
 3. Click it to open the floating Document Picture-in-Picture player.
 4. If you can't find the button, click the extension icon in the toolbar, then click **Highlight Button on Page** to scroll to and flash it.
+
+### Customize the trigger button
+- Click the extension icon in the toolbar and enable **Compact button** to collapse the on-page button to just the icon (no "Lyrics PiP" text). The change applies instantly to open YouTube tabs and is synced across your Chrome profile.
+- The button is hidden automatically while a video is in fullscreen and comes back when you exit fullscreen.
 
 ### Using the floating player
 - Use **Play/Pause** and **±10s** to control playback on the YouTube tab remotely, or drag the seek bar to jump to a position.

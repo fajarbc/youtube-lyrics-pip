@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
   "name": "YouTube Lyrics PiP",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Mini player for YouTube/YouTube Music with synced lyrics in a Document Picture-in-Picture window.",
-  "permissions": ["tabs"],
+  "permissions": ["tabs", "storage"],
   "host_permissions": [
     "*://*.youtube.com/*",
     "https://lrclib.net/*",

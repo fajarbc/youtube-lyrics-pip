@@ -13,14 +13,18 @@
     /\s*[-–—|]\s*(?:official\s*)?(?:music\s*)?(?:video|audio|lyrics?).*$/gi
   ];
 
+  const FAB_SETTINGS_DEFAULTS = { fabCollapsed: false };
+
   let video = null;
   let lastUrl = location.href;
   let lastMetadataKey = "";
   let sendTimer = null;
   let urlTimer = null;
+  let fullscreenRecheckTimer = null;
   let mediaMetadataListenersBound = false;
   let activePipBridge = null;
   let extensionInvalidated = false;
+  let fabCollapsed = FAB_SETTINGS_DEFAULTS.fabCollapsed;
 
   function isContextInvalidatedError(error) {
     return /context invalidated/i.test(error?.message || "");
@@ -35,8 +39,11 @@
     );
 
     clearTimeout(sendTimer);
+    clearTimeout(fullscreenRecheckTimer);
     clearInterval(urlTimer);
     observer?.disconnect();
+    document.removeEventListener("fullscreenchange", onFullscreenChange);
+    document.removeEventListener("webkitfullscreenchange", onFullscreenChange);
     pipTriggerButton?.remove();
     pipTriggerButton = null;
   }
@@ -213,6 +220,52 @@
 
   let pipTriggerButton = null;
 
+  // True while YouTube / YouTube Music is showing a video in fullscreen.
+  // The browser Fullscreen API is the primary signal; the player class is a
+  // fallback for cases where YouTube toggles its own fullscreen UI state.
+  function isFullscreen() {
+    return Boolean(
+      document.fullscreenElement ||
+        document.webkitFullscreenElement ||
+        document.querySelector(".html5-video-player.ytp-fullscreen")
+    );
+  }
+
+  function updatePipTriggerVisibility() {
+    if (!pipTriggerButton) return;
+    pipTriggerButton.style.display = isFullscreen() ? "none" : "inline-flex";
+  }
+
+  function onFullscreenChange() {
+    updatePipTriggerVisibility();
+    // YouTube updates its player classes slightly after the fullscreen event,
+    // so re-check once more after the transition settles.
+    clearTimeout(fullscreenRecheckTimer);
+    fullscreenRecheckTimer = setTimeout(updatePipTriggerVisibility, 300);
+  }
+
+  function applyPipTriggerAppearance() {
+    if (!pipTriggerButton) return;
+
+    const label = pipTriggerButton.querySelector(".yt-lyrics-pip-label");
+    const logo = pipTriggerButton.querySelector(".yt-lyrics-pip-logo");
+    const iconSize = fabCollapsed ? 22 : 16;
+
+    pipTriggerButton.dataset.collapsed = String(fabCollapsed);
+    pipTriggerButton.title = fabCollapsed ? "Open Lyrics PiP" : "";
+    pipTriggerButton.style.gap = fabCollapsed ? "0" : "8px";
+    pipTriggerButton.style.padding = fabCollapsed ? "10px" : "10px 18px";
+    pipTriggerButton.style.justifyContent = "center";
+    if (label) label.style.display = fabCollapsed ? "none" : "";
+    if (logo) {
+      logo.style.width = `${iconSize}px`;
+      logo.style.height = `${iconSize}px`;
+      logo.style.fontSize = `${iconSize - 4}px`;
+    }
+
+    updatePipTriggerVisibility();
+  }
+
   function createPipTriggerButton() {
     const button = document.createElement("button");
     button.id = "yt-lyrics-pip-trigger";
@@ -238,13 +291,29 @@
     ].join(";");
 
     const logo = document.createElement("img");
+    logo.className = "yt-lyrics-pip-logo";
     logo.src = chrome.runtime.getURL("logo.png");
     logo.alt = "";
     logo.style.cssText = "width: 16px; height: 16px; border-radius: 4px; object-fit: cover; flex: 0 0 auto;";
-    logo.addEventListener("error", () => logo.remove(), { once: true });
+    logo.addEventListener(
+      "error",
+      () => {
+        // Keep an icon visible (important when the button is collapsed).
+        const fallback = document.createElement("span");
+        fallback.className = "yt-lyrics-pip-logo";
+        fallback.textContent = "🎵";
+        fallback.setAttribute("aria-hidden", "true");
+        fallback.style.cssText =
+          "display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; line-height: 1; flex: 0 0 auto;";
+        logo.replaceWith(fallback);
+        applyPipTriggerAppearance();
+      },
+      { once: true }
+    );
     button.appendChild(logo);
 
     const label = document.createElement("span");
+    label.className = "yt-lyrics-pip-label";
     label.textContent = "Lyrics PiP";
     button.appendChild(label);
 
@@ -263,6 +332,29 @@
     if (pipTriggerButton && document.body.contains(pipTriggerButton)) return;
     pipTriggerButton = createPipTriggerButton();
     document.body.appendChild(pipTriggerButton);
+    applyPipTriggerAppearance();
+  }
+
+  function setFabCollapsed(nextValue) {
+    fabCollapsed = Boolean(nextValue);
+    applyPipTriggerAppearance();
+  }
+
+  function loadFabSettings() {
+    try {
+      chrome.storage?.sync?.get(FAB_SETTINGS_DEFAULTS, (settings) => {
+        if (chrome.runtime.lastError) return;
+        setFabCollapsed(settings?.fabCollapsed);
+      });
+
+      chrome.storage?.onChanged?.addListener((changes, areaName) => {
+        if (areaName === "sync" && changes.fabCollapsed) {
+          setFabCollapsed(changes.fabCollapsed.newValue);
+        }
+      });
+    } catch (error) {
+      if (isContextInvalidatedError(error)) handleExtensionInvalidated();
+    }
   }
 
   function highlightPipTriggerButton() {
@@ -330,7 +422,7 @@
   async function openFloatingPlayer() {
     if (!pipTriggerButton) return;
 
-    const labelElement = pipTriggerButton.querySelector("span");
+    const labelElement = pipTriggerButton.querySelector(".yt-lyrics-pip-label");
     const originalLabel = labelElement ? labelElement.textContent : "";
     pipTriggerButton.disabled = true;
     if (labelElement) labelElement.textContent = "Opening…";
@@ -407,7 +499,7 @@
     } finally {
       if (pipTriggerButton) {
         pipTriggerButton.disabled = false;
-        const currentLabel = pipTriggerButton.querySelector("span");
+        const currentLabel = pipTriggerButton.querySelector(".yt-lyrics-pip-label");
         if (currentLabel) currentLabel.textContent = originalLabel;
       }
     }
@@ -496,6 +588,9 @@
     document.addEventListener("visibilitychange", () => sendState(true));
   }
 
+  document.addEventListener("fullscreenchange", onFullscreenChange);
+  document.addEventListener("webkitfullscreenchange", onFullscreenChange);
+
   urlTimer = setInterval(() => {
     discoverVideo();
     if (location.href !== lastUrl) {
@@ -509,4 +604,5 @@
   discoverVideo();
   sendState(true);
   ensurePipTriggerButton();
+  loadFabSettings();
 })();

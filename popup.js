@@ -1,8 +1,25 @@
 const openButton = document.getElementById("openPip");
 const statusElement = document.getElementById("status");
 const logoElement = document.getElementById("logo");
+const collapseFabToggle = document.getElementById("collapseFab");
+
+const FAB_SETTINGS_DEFAULTS = { fabCollapsed: false };
 
 logoElement?.addEventListener("error", () => logoElement.remove(), { once: true });
+
+chrome.storage.sync.get(FAB_SETTINGS_DEFAULTS, (settings) => {
+  if (chrome.runtime.lastError) return;
+  collapseFabToggle.checked = Boolean(settings.fabCollapsed);
+});
+
+collapseFabToggle.addEventListener("change", () => {
+  statusElement.textContent = "";
+  chrome.storage.sync.set({ fabCollapsed: collapseFabToggle.checked }, () => {
+    if (chrome.runtime.lastError) {
+      statusElement.textContent = chrome.runtime.lastError.message;
+    }
+  });
+});
 
 function sendTabMessage(tabId, message) {
   return new Promise((resolve, reject) => {
