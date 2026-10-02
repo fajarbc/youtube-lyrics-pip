@@ -30,6 +30,26 @@
       }
       h1 { margin: 0; font-size: 18px; }
       p { margin: 0 0 16px; color: #a8abb2; font-size: 13px; line-height: 1.5; }
+      .option {
+        display: flex;
+        align-items: flex-start;
+        gap: 10px;
+        margin: 0 0 16px;
+        padding: 10px 12px;
+        border-radius: 12px;
+        background: #1b1c1f;
+        cursor: pointer;
+      }
+      .option input {
+        margin: 2px 0 0;
+        width: 16px;
+        height: 16px;
+        flex: 0 0 auto;
+        accent-color: #1ed760;
+        cursor: pointer;
+      }
+      .option strong { display: block; font-size: 13px; }
+      .option small { display: block; margin-top: 2px; color: #a8abb2; font-size: 12px; line-height: 1.4; }
       button {
         width: 100%;
         border: 0;
@@ -53,8 +73,16 @@
     <p>
       Play a song on YouTube or YouTube Music. A floating
       <strong>"🎵 Lyrics PiP"</strong> button will appear in the bottom-right
-      corner of the page &mdash; click it to open the floating player.
+      corner of the page &mdash; click it to open the floating player. The
+      button hides automatically while a video is fullscreen.
     </p>
+    <label class="option" for="collapseFab">
+      <input id="collapseFab" type="checkbox" />
+      <span>
+        <strong>Compact button</strong>
+        <small>Collapse the floating button to just the icon, without the "Lyrics PiP" text.</small>
+      </span>
+    </label>
     <button id="openPip" type="button">Highlight Button on Page</button>
     <div id="status" role="status"></div>
     <script src="popup.js"></script>
