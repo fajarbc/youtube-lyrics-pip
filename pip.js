@@ -23,7 +23,6 @@
     searchForm: document.getElementById("searchForm"),
     searchInput: document.getElementById("searchInput"),
     searchResults: document.getElementById("searchResults"),
-    closeSearch: document.getElementById("closeSearch"),
     offsetEarlier: document.getElementById("offsetEarlier"),
     offsetLater: document.getElementById("offsetLater"),
     offsetValue: document.getElementById("offsetValue"),
@@ -768,7 +767,6 @@
     event.preventDefault();
     runManualSearch();
   });
-  elements.closeSearch?.addEventListener("click", closeSearchPanel);
 
   // Emptying the box (typing it away or the native clear "x") clears results.
   elements.searchInput.addEventListener("input", () => {
