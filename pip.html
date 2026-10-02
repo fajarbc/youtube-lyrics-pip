@@ -56,9 +56,11 @@
         <div class="panel-body" id="transportBody">
           <div class="panel-body-inner">
             <div class="buttons">
+              <button id="previous" class="icon-button skip-button skip-previous" type="button" aria-label="Previous track" title="Previous track"><span aria-hidden="true"></span></button>
               <button id="backward" class="icon-button" type="button" aria-label="Rewind 10 seconds">−10</button>
               <button id="toggle" class="play-button" type="button" aria-label="Play"></button>
               <button id="forward" class="icon-button" type="button" aria-label="Forward 10 seconds">+10</button>
+              <button id="next" class="icon-button skip-button skip-next" type="button" aria-label="Next track" title="Next track"><span aria-hidden="true"></span></button>
             </div>
 
             <input id="progress" type="range" min="0" max="100" step="0.1" value="0" aria-label="Song position" />
@@ -73,21 +75,34 @@
       <section class="lyrics-panel">
         <div class="lyrics-toolbar">
           <span class="panel-title">Lyrics</span>
-          <button id="searchLyrics" class="search-button" type="button" aria-label="Search lyrics" aria-expanded="false" title="Search lyrics">
-            <span aria-hidden="true"></span>
-          </button>
+          <div class="lyrics-tools">
+            <div class="tool-group" role="group" aria-label="Text size">
+              <button id="textSmaller" class="tool-button" type="button" aria-label="Smaller lyrics text" title="Smaller text">A−</button>
+              <button id="textLarger" class="tool-button" type="button" aria-label="Larger lyrics text" title="Larger text">A+</button>
+            </div>
+            <div class="tool-group" role="group" aria-label="Lyrics timing">
+              <button id="offsetLater" class="tool-button" type="button" aria-label="Show lyrics 0.5 seconds later" title="Lyrics too early? Delay them 0.5s">−</button>
+              <button id="offsetValue" class="tool-button offset-value" type="button" aria-label="Reset lyrics timing" title="Lyrics timing offset (click to reset)">0.0s</button>
+              <button id="offsetEarlier" class="tool-button" type="button" aria-label="Show lyrics 0.5 seconds earlier" title="Lyrics too late? Show them 0.5s earlier">+</button>
+            </div>
+            <button id="searchLyrics" class="search-button" type="button" aria-label="Search lyrics" aria-expanded="false" title="Search lyrics">
+              <span aria-hidden="true"></span>
+            </button>
+          </div>
         </div>
         <div id="searchPanel" class="search-panel" hidden>
           <form id="searchForm" class="search-form">
             <input id="searchInput" type="search" autocomplete="off" placeholder="Title or artist" aria-label="Search lyrics by title or artist" />
             <button type="submit">Search</button>
+            <button id="closeSearch" class="search-close" type="button" aria-label="Hide search" title="Hide search">×</button>
           </form>
           <div id="searchResults" class="search-results" aria-live="polite"></div>
         </div>
-        <div id="lyrics" class="lyrics" aria-live="polite">
+        <div id="lyrics" class="lyrics" aria-live="polite" tabindex="0">
           <div id="lyricsStatus" class="lyrics-status">Connecting to YouTube…</div>
         </div>
       </section>
     </main>
+    <div id="toast" class="toast" role="status" hidden></div>
   </body>
 </html>

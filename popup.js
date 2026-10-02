@@ -44,6 +44,9 @@ openButton.addEventListener("click", async () => {
     }
 
     const response = await sendTabMessage(activeTab.id, { type: "HIGHLIGHT_PIP_BUTTON" });
+    if (response?.reason === "no-media") {
+      throw new Error("Open a video or start a song first. The button only shows where something can play.");
+    }
     if (!response?.ok) {
       throw new Error("Reload the YouTube page, then try again.");
     }

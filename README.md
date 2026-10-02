@@ -27,17 +27,22 @@ Licensed under the [MIT License](LICENSE).
 - Time-synced lyrics fetched from [LRCLIB](https://lrclib.net), with the current line highlighted in real time and a plain-text fallback when synced lyrics aren't available.
 - Fuzzy LRCLIB fallback search when exact metadata is imprecise, plus a PiP search picker for choosing another release with synced lyrics.
 - Last-resort plain-text lookup through [lyrics.ovh](https://lyrics.ovh) when LRCLIB has no matching track.
-- Remote playback controls (play/pause, ±10s seek, seek bar) that control the actual YouTube tab.
+- Remote playback controls (play/pause, ±10s seek, previous/next track, seek bar) that control the actual YouTube tab.
+- **Click any synced lyric line** to jump the video to that moment.
+- Per-video **lyrics timing offset** (±0.5s steps) for music videos whose intros don't match the timed lyrics.
+- Manual lyrics picks are **remembered per video**, and lookups are cached locally (30 days, up to 300 tracks) to avoid repeat requests and rate limits.
+- Auto-scroll pauses for a few seconds while you scroll the lyrics yourself, then re-centers on the current line.
+- Adjustable lyrics text size (A− / A+), remembered across sessions.
 - Collapsible "Now Playing" and "Controls" panels to give lyrics more room.
 - Optional **compact trigger button** that collapses the on-page "Lyrics PiP" button to just its icon.
-- The on-page trigger button **hides automatically in fullscreen** so it never covers the video.
+- The on-page trigger button **hides automatically in fullscreen** so it never covers the video, and only appears on watch pages, the miniplayer, or YouTube Music with a track loaded.
 - Automatically targets whichever open YouTube tab is currently playing, across multiple tabs.
 
 ## Architecture
 - **Tech stack**: Vanilla HTML/CSS/JS, Manifest V3. No npm packages or bundlers required.
 - **`manifest.json`**: Extension manifest, permissions, and web-accessible resources.
 - **`background.js`**: Service worker that tracks playback state per tab, resolves which tab to control, and relays commands/state between the content script and the floating player.
-- **`content.js`**: Injected into YouTube/YouTube Music pages. Detects the video element and song metadata, executes playback commands, and hosts the floating trigger button that opens the Document Picture-in-Picture window. The button reads the compact setting from `chrome.storage.sync` and hides itself while the page is fullscreen. This has to run from the page itself rather than the extension popup — see [Limitations & Risks](#limitations--risks).
+- **`content.js`**: Injected into YouTube/YouTube Music pages. Detects the video element and song metadata, executes playback commands, and hosts the floating trigger button that opens the Document Picture-in-Picture window. The button reads the compact setting from `chrome.storage.sync` and hides itself while the page is fullscreen or has nothing to play. Page changes are checked at most twice a second instead of on every DOM mutation. It also relays a small, key-restricted `chrome.storage.local` bridge to the PiP window for offsets, picks, the lyrics cache, and text size. This has to run from the page itself rather than the extension popup — see [Limitations & Risks](#limitations--risks).
 - **`pip.html` / `pip.css` / `pip.js`**: The floating player UI — artwork, title/artist, transport controls, seek bar, and the synced lyrics view. Runs inside the Document PiP window and talks back to `content.js` over a `MessageChannel` bridge, since the PiP window executes in a separate, unprivileged JS context with no direct extension API access.
 - **`popup.html` / `popup.js`**: Toolbar popup. Highlights/scrolls to the floating trigger button on the active YouTube tab (Chrome does not allow opening a Document PiP window directly from a popup) and hosts the **Compact button** setting.
 
@@ -80,9 +85,11 @@ Every push to `main` (and every manual GitHub Actions run) builds `youtube-lyric
 - The button is hidden automatically while a video is in fullscreen and comes back when you exit fullscreen.
 
 ### Using the floating player
-- Use **Play/Pause** and **±10s** to control playback on the YouTube tab remotely, or drag the seek bar to jump to a position.
-- Synced lyrics automatically scroll and highlight the current line as the song plays.
-- Use the search icon above the lyrics to edit the title or artist, compare LRCLIB candidates, and select a result manually.
+- Use **Play/Pause**, **±10s**, and **previous/next** to control playback on the YouTube tab remotely, or drag the seek bar to jump to a position. Previous restarts the song first if it's more than 3 seconds in.
+- Synced lyrics automatically scroll and highlight the current line as the song plays. Click a line to jump there; scroll manually and auto-scroll pauses for a few seconds.
+- Lyrics running ahead or behind? Use **−** / **+** next to the timing value in the lyrics toolbar (0.5s steps, saved for that video). Click the value to reset it.
+- Use **A−** / **A+** to change the lyrics text size.
+- Use the search icon above the lyrics to edit the title or artist, compare LRCLIB candidates, and select a result manually. Your pick is remembered for that video.
 - Click the chevron on the **Now Playing** or **Controls** panel headers to collapse them and give the lyrics more vertical space.
 - The floating window stays on top of other windows and apps, even when you switch tabs.
 
