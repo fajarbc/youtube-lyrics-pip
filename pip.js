@@ -9,6 +9,8 @@
     title: document.getElementById("title"),
     artist: document.getElementById("artist"),
     toggle: document.getElementById("toggle"),
+    previous: document.getElementById("previous"),
+    next: document.getElementById("next"),
     backward: document.getElementById("backward"),
     forward: document.getElementById("forward"),
     progress: document.getElementById("progress"),
@@ -20,10 +22,25 @@
     searchPanel: document.getElementById("searchPanel"),
     searchForm: document.getElementById("searchForm"),
     searchInput: document.getElementById("searchInput"),
-    searchResults: document.getElementById("searchResults")
+    searchResults: document.getElementById("searchResults"),
+    offsetEarlier: document.getElementById("offsetEarlier"),
+    offsetLater: document.getElementById("offsetLater"),
+    offsetValue: document.getElementById("offsetValue"),
+    textSmaller: document.getElementById("textSmaller"),
+    textLarger: document.getElementById("textLarger"),
+    toast: document.getElementById("toast")
   };
 
   elements.brandLogo?.addEventListener("error", () => elements.brandLogo.remove(), { once: true });
+
+  const SYNC_LEAD_SECONDS = 0.12;
+  const OFFSET_STEP_SECONDS = 0.5;
+  const OFFSET_LIMIT_SECONDS = 10;
+  const LYRICS_SCALE = { min: 0.8, max: 1.6, step: 0.1, fallback: 1 };
+  const AUTOSCROLL_PAUSE_MS = 4000;
+  const CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+  const CACHE_LIMIT = 300;
+  const STORAGE_TIMEOUT_MS = 1500;
 
   let state = {
     title: "Waiting for a song…",
@@ -31,7 +48,8 @@
     artwork: "",
     currentTime: 0,
     duration: 0,
-    paused: true
+    paused: true,
+    videoId: ""
   };
 
   let syncedLyrics = [];
@@ -40,6 +58,13 @@
   let lyricsRequestId = 0;
   let searchRequestId = 0;
   let seeking = false;
+  let lyricsOffset = 0;
+  let offsetStorageKey = "";
+  let lyricsScale = LYRICS_SCALE.fallback;
+  let autoscrollPausedUntil = 0;
+  let autoscrollResumeTimer = null;
+  let toastTimer = null;
+  let extensionVersion = "1.0.0";
 
   function handlePortMessage(event) {
     const message = event.data;
@@ -67,6 +92,7 @@
 
         window.removeEventListener("message", handler);
         targetTabId = message.targetTabId ?? null;
+        if (message.extensionVersion) extensionVersion = message.extensionVersion;
         port = event.ports[0];
         port.onmessage = handlePortMessage;
         resolve(port);
@@ -74,7 +100,7 @@
     });
   }
 
-  function runtimeMessage(message) {
+  function portRequest(type, payload) {
     return new Promise((resolve, reject) => {
       if (!port) {
         reject(new Error("Extension runtime not available."));
@@ -83,8 +109,58 @@
 
       const requestId = ++requestCounter;
       pendingRequests.set(requestId, { resolve, reject });
-      port.postMessage({ type: "RUNTIME_MESSAGE", requestId, payload: message });
+      port.postMessage({ type, requestId, payload });
     });
+  }
+
+  function runtimeMessage(message) {
+    return portRequest("RUNTIME_MESSAGE", message);
+  }
+
+  // Storage goes through content.js (the PiP window has no extension APIs).
+  // Failures are non-fatal: lyrics still load, they just aren't remembered.
+  // The timeout keeps a lost reply from ever blocking lyrics from loading.
+  function storageRequest(payload) {
+    return Promise.race([
+      portRequest("STORAGE_REQUEST", payload),
+      wait(STORAGE_TIMEOUT_MS).then(() => {
+        throw new Error("Storage request timed out.");
+      })
+    ]);
+  }
+
+  async function storageGet(keys) {
+    try {
+      return (await storageRequest({ action: "get", keys })) || {};
+    } catch {
+      return {};
+    }
+  }
+
+  async function storageSet(items) {
+    try {
+      await storageRequest({ action: "set", items });
+    } catch {
+      // Ignore persistence failures.
+    }
+  }
+
+  async function storageRemove(keys) {
+    try {
+      await storageRequest({ action: "remove", keys });
+    } catch {
+      // Ignore persistence failures.
+    }
+  }
+
+  function showToast(text) {
+    if (!elements.toast) return;
+    elements.toast.textContent = text;
+    elements.toast.hidden = false;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => {
+      elements.toast.hidden = true;
+    }, 2600);
   }
 
   function formatTime(seconds) {
@@ -97,6 +173,11 @@
 
   function trackKey(nextState) {
     return `${nextState.title || ""}|${nextState.artist || ""}|${Math.round(nextState.duration || 0)}`;
+  }
+
+  // Per-video identity for things the user tuned by hand (offset, manual pick).
+  function mediaKey(nextState) {
+    return nextState.videoId ? `v:${nextState.videoId}` : `t:${trackKey(nextState)}`;
   }
 
   function setLyricsStatus(text, isError = false) {
@@ -150,21 +231,50 @@
     });
 
     elements.lyrics.appendChild(fragment);
+    elements.lyrics.classList.add("is-synced");
     elements.lyrics.scrollTop = 0;
     activeLyricIndex = -1;
     syncLyrics(state.currentTime);
   }
 
-  function syncLyrics(currentTime) {
+  function isAutoscrollPaused() {
+    return Date.now() < autoscrollPausedUntil;
+  }
+
+  function scrollActiveLineIntoView() {
+    if (activeLyricIndex < 0) return;
+    const active = elements.lyrics.querySelector(`[data-index="${activeLyricIndex}"]`);
+    active?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+
+  // Called when the user scrolls the lyrics themselves: stop snapping back
+  // to the current line for a few seconds, then resume and re-center.
+  function pauseAutoscroll() {
+    if (!syncedLyrics.length) return;
+    autoscrollPausedUntil = Date.now() + AUTOSCROLL_PAUSE_MS;
+    clearTimeout(autoscrollResumeTimer);
+    autoscrollResumeTimer = setTimeout(() => {
+      autoscrollPausedUntil = 0;
+      scrollActiveLineIntoView();
+    }, AUTOSCROLL_PAUSE_MS);
+  }
+
+  function resumeAutoscroll() {
+    autoscrollPausedUntil = 0;
+    clearTimeout(autoscrollResumeTimer);
+  }
+
+  function syncLyrics(currentTime, { forceScroll = false } = {}) {
     if (!syncedLyrics.length) return;
 
+    const effectiveTime = currentTime + SYNC_LEAD_SECONDS + lyricsOffset;
     let low = 0;
     let high = syncedLyrics.length - 1;
     let found = -1;
 
     while (low <= high) {
       const middle = Math.floor((low + high) / 2);
-      if (syncedLyrics[middle].time <= currentTime + 0.12) {
+      if (syncedLyrics[middle].time <= effectiveTime) {
         found = middle;
         low = middle + 1;
       } else {
@@ -172,7 +282,10 @@
       }
     }
 
-    if (found === activeLyricIndex) return;
+    if (found === activeLyricIndex) {
+      if (forceScroll && !isAutoscrollPaused()) scrollActiveLineIntoView();
+      return;
+    }
 
     const previous = elements.lyrics.querySelector(".lyric-line.active");
     previous?.classList.remove("active");
@@ -181,11 +294,13 @@
     if (found >= 0) {
       const active = elements.lyrics.querySelector(`[data-index="${found}"]`);
       active?.classList.add("active");
-      active?.scrollIntoView({ behavior: "smooth", block: "center" });
+      if (!isAutoscrollPaused()) active?.scrollIntoView({ behavior: "smooth", block: "center" });
     }
   }
 
-  const LRCLIB_CLIENT_ID = "YouTube Lyrics PiP/1.0.0 (https://github.com/fajarbc/youtube-lyrics-pip)";
+  function lrclibClientId() {
+    return `YouTube Lyrics PiP/${extensionVersion} (https://github.com/fajarbc/youtube-lyrics-pip)`;
+  }
 
   function wait(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
@@ -193,13 +308,14 @@
 
   async function fetchLrclib(url, { retries = 2, retryDelayMs = 800 } = {}) {
     for (let attempt = 0; ; attempt += 1) {
+      const clientId = lrclibClientId();
       const response = await fetch(url, {
         headers: {
           Accept: "application/json",
           // Browsers forbid scripts from overriding the real User-Agent header,
           // so identify this client via LRCLIB's documented alternatives instead.
-          "Lrclib-Client": LRCLIB_CLIENT_ID,
-          "X-User-Agent": LRCLIB_CLIENT_ID
+          "Lrclib-Client": clientId,
+          "X-User-Agent": clientId
         }
       });
 
@@ -274,6 +390,7 @@
   }
 
   function renderLyricsData(data) {
+    elements.lyrics.classList.remove("is-synced");
     const parsed = parseLrc(data?.syncedLyrics || "");
     if (parsed.length) {
       syncedLyrics = parsed;
@@ -285,6 +402,31 @@
       return true;
     }
     return false;
+  }
+
+  // Only keep what's needed to re-render; LRCLIB results carry extra fields.
+  function lyricsRecord(data, source) {
+    return {
+      source,
+      id: data?.id ?? null,
+      trackName: data?.trackName || "",
+      artistName: data?.artistName || "",
+      syncedLyrics: data?.syncedLyrics || "",
+      plainLyrics: data?.plainLyrics || "",
+      savedAt: Date.now()
+    };
+  }
+
+  async function saveCachedLyrics(cacheKey, record) {
+    if (!record.syncedLyrics.trim() && !record.plainLyrics.trim()) return;
+
+    const { cacheIndex } = await storageGet(["cacheIndex"]);
+    const index = (Array.isArray(cacheIndex) ? cacheIndex : []).filter((key) => key !== cacheKey);
+    index.push(cacheKey);
+    const evicted = index.length > CACHE_LIMIT ? index.splice(0, index.length - CACHE_LIMIT) : [];
+
+    await storageSet({ [cacheKey]: record, cacheIndex: index });
+    if (evicted.length) await storageRemove(evicted);
   }
 
   async function fetchLyricsOvh(title, artist) {
@@ -330,7 +472,14 @@
         lyricsRequestId += 1;
         syncedLyrics = [];
         activeLyricIndex = -1;
-        if (!renderLyricsData(candidate)) setLyricsStatus("This result has no lyrics.", true);
+        resumeAutoscroll();
+        if (renderLyricsData(candidate)) {
+          // Remember this choice for the video so it sticks next time.
+          storageSet({ [`pick:${mediaKey(state)}`]: lyricsRecord(candidate, "manual") });
+          showToast("Saved as the lyrics for this video");
+        } else {
+          setLyricsStatus("This result has no lyrics.", true);
+        }
         closeSearchPanel();
       });
       fragment.appendChild(button);
@@ -363,7 +512,7 @@
     }
   }
 
-  async function loadFallbackLyrics(nextState, requestId) {
+  async function loadFallbackLyrics(nextState, requestId, cacheKey) {
     const candidates = await searchLrclib(
       [nextState.title, nextState.artist]
         .filter((value) => value && !value.startsWith("Unknown "))
@@ -373,15 +522,22 @@
 
     const candidate = pickBestCandidate(candidates, nextState);
     if (candidate) {
-      if (renderLyricsData(candidate)) return true;
+      if (renderLyricsData(candidate)) {
+        saveCachedLyrics(cacheKey, lyricsRecord(candidate, "lrclib-search"));
+        return true;
+      }
       setLyricsStatus("LRCLIB found this track, but it has no lyrics.");
       return true;
     }
 
     const lyrics = await fetchLyricsOvh(nextState.title, nextState.artist);
     if (requestId !== lyricsRequestId) return true;
-    if (lyrics) renderPlainLyrics(lyrics);
-    else setLyricsStatus("Lyrics not found.");
+    if (lyrics) {
+      renderPlainLyrics(lyrics);
+      saveCachedLyrics(cacheKey, lyricsRecord({ plainLyrics: lyrics }, "lyrics.ovh"));
+    } else {
+      setLyricsStatus("Lyrics not found.");
+    }
     return true;
   }
 
@@ -400,13 +556,90 @@
     }
   }
 
+  function formatOffset(seconds) {
+    if (!seconds) return "0.0s";
+    return `${seconds > 0 ? "+" : "−"}${Math.abs(seconds).toFixed(1)}s`;
+  }
+
+  function renderOffset() {
+    if (elements.offsetValue) {
+      elements.offsetValue.textContent = formatOffset(lyricsOffset);
+      elements.offsetValue.classList.toggle("is-adjusted", lyricsOffset !== 0);
+    }
+  }
+
+  async function loadOffset(key) {
+    offsetStorageKey = `offset:${key}`;
+    const stored = await storageGet([offsetStorageKey]);
+    const value = Number(stored[offsetStorageKey]);
+    lyricsOffset = Number.isFinite(value) ? value : 0;
+    renderOffset();
+  }
+
+  // Positive offset = lyrics show earlier, negative = later.
+  function changeOffset(delta) {
+    const next = Math.round((lyricsOffset + delta) * 10) / 10;
+    lyricsOffset = Math.max(-OFFSET_LIMIT_SECONDS, Math.min(OFFSET_LIMIT_SECONDS, next));
+    renderOffset();
+    syncLyrics(state.currentTime, { forceScroll: true });
+
+    if (!offsetStorageKey) return;
+    if (lyricsOffset === 0) storageRemove([offsetStorageKey]);
+    else storageSet({ [offsetStorageKey]: lyricsOffset });
+  }
+
+  function resetOffset() {
+    if (lyricsOffset !== 0) changeOffset(-lyricsOffset);
+  }
+
+  function applyLyricsScale() {
+    elements.lyrics.style.setProperty("--lyrics-scale", String(lyricsScale));
+    if (elements.textSmaller) elements.textSmaller.disabled = lyricsScale <= LYRICS_SCALE.min + 0.001;
+    if (elements.textLarger) elements.textLarger.disabled = lyricsScale >= LYRICS_SCALE.max - 0.001;
+  }
+
+  function changeLyricsScale(direction) {
+    const next = Math.round((lyricsScale + direction * LYRICS_SCALE.step) * 10) / 10;
+    lyricsScale = Math.max(LYRICS_SCALE.min, Math.min(LYRICS_SCALE.max, next));
+    applyLyricsScale();
+    storageSet({ lyricsScale });
+    syncLyrics(state.currentTime, { forceScroll: true });
+  }
+
+  async function loadLyricsScale() {
+    const { lyricsScale: stored } = await storageGet(["lyricsScale"]);
+    const value = Number(stored);
+    if (Number.isFinite(value) && value >= LYRICS_SCALE.min && value <= LYRICS_SCALE.max) {
+      lyricsScale = value;
+    }
+    applyLyricsScale();
+  }
+
   async function loadLyrics(nextState) {
     const requestId = ++lyricsRequestId;
     syncedLyrics = [];
     activeLyricIndex = -1;
+    resumeAutoscroll();
+    elements.lyrics.classList.remove("is-synced");
 
     if (!nextState.title || nextState.title === "Unknown title") {
       setLyricsStatus("Waiting for song metadata…");
+      return;
+    }
+
+    const key = mediaKey(nextState);
+    const cacheKey = `cache:${trackKey(nextState)}`;
+    const pickKey = `pick:${key}`;
+
+    const [stored] = await Promise.all([storageGet([pickKey, cacheKey]), loadOffset(key)]);
+    if (requestId !== lyricsRequestId) return;
+
+    // 1) A result the user picked by hand for this video.
+    if (stored[pickKey] && renderLyricsData(stored[pickKey])) return;
+
+    // 2) A recent cached lookup for this exact track.
+    const cached = stored[cacheKey];
+    if (cached && Date.now() - (Number(cached.savedAt) || 0) < CACHE_TTL_MS && renderLyricsData(cached)) {
       return;
     }
 
@@ -427,7 +660,7 @@
       if (requestId !== lyricsRequestId) return;
 
       if (response.status === 404) {
-        await loadFallbackLyrics(nextState, requestId);
+        await loadFallbackLyrics(nextState, requestId, cacheKey);
         return;
       }
       if (response.status === 429) {
@@ -441,7 +674,8 @@
       const data = await response.json();
       if (requestId !== lyricsRequestId) return;
 
-      if (!renderLyricsData(data)) await loadFallbackLyrics(nextState, requestId);
+      if (renderLyricsData(data)) saveCachedLyrics(cacheKey, lyricsRecord(data, "lrclib"));
+      else await loadFallbackLyrics(nextState, requestId, cacheKey);
     } catch (error) {
       if (requestId === lyricsRequestId) {
         setLyricsStatus(`Failed to fetch lyrics: ${error.message}`, true);
@@ -498,9 +732,13 @@
 
       if (!response?.ok) throw new Error(response?.error || "Command failed.");
       if (response.tabId != null) targetTabId = response.tabId;
+      if (response.response && response.response.ok === false) {
+        throw new Error(response.response.error || "Command failed.");
+      }
       if (response.response?.state) render(response.response.state);
     } catch (error) {
-      setLyricsStatus(error.message, true);
+      // Don't wipe the lyrics for a failed button press.
+      showToast(error.message);
     }
   }
 
@@ -514,10 +752,45 @@
   elements.toggle.addEventListener("click", () => command("TOGGLE"));
   elements.backward.addEventListener("click", () => command("JUMP", -10));
   elements.forward.addEventListener("click", () => command("JUMP", 10));
+  elements.previous?.addEventListener("click", () => command("PREV"));
+  elements.next?.addEventListener("click", () => command("NEXT"));
   elements.searchLyrics.addEventListener("click", toggleSearchPanel);
   elements.searchForm.addEventListener("submit", (event) => {
     event.preventDefault();
     runManualSearch();
+  });
+
+  elements.offsetEarlier?.addEventListener("click", () => changeOffset(OFFSET_STEP_SECONDS));
+  elements.offsetLater?.addEventListener("click", () => changeOffset(-OFFSET_STEP_SECONDS));
+  elements.offsetValue?.addEventListener("click", resetOffset);
+  elements.textSmaller?.addEventListener("click", () => changeLyricsScale(-1));
+  elements.textLarger?.addEventListener("click", () => changeLyricsScale(1));
+
+  // Click a synced line to jump the video there.
+  elements.lyrics.addEventListener("click", (event) => {
+    const line = event.target.closest?.(".lyric-line");
+    if (!line || !syncedLyrics.length) return;
+    if (window.getSelection()?.toString()) return;
+
+    const entry = syncedLyrics[Number(line.dataset.index)];
+    if (!entry) return;
+
+    resumeAutoscroll();
+    command("SEEK", Math.max(0, entry.time - lyricsOffset));
+  });
+
+  // Manual scrolling pauses auto-scroll. Programmatic scrollIntoView doesn't
+  // fire these input events, so they reliably mean "the user is scrolling".
+  elements.lyrics.addEventListener("wheel", pauseAutoscroll, { passive: true });
+  elements.lyrics.addEventListener("touchmove", pauseAutoscroll, { passive: true });
+  elements.lyrics.addEventListener("pointerdown", (event) => {
+    // Grabbing the scrollbar targets the container itself, not a line.
+    if (event.target === elements.lyrics) pauseAutoscroll();
+  });
+  elements.lyrics.addEventListener("keydown", (event) => {
+    if (["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "].includes(event.key)) {
+      pauseAutoscroll();
+    }
   });
 
   function setupCollapsiblePanel(toggleId, bodyId) {
@@ -552,9 +825,12 @@
 
   async function initialize() {
     setLyricsStatus("Connecting to YouTube…");
+    renderOffset();
+    applyLyricsScale();
 
     try {
       await waitForPort();
+      loadLyricsScale();
 
       const response = await runtimeMessage({
         type: "PIP_READY",

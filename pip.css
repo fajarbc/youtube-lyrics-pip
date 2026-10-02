@@ -153,7 +153,7 @@ button { -webkit-tap-highlight-color: transparent; }
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 18px;
+  gap: 12px;
   margin-bottom: 10px;
 }
 
@@ -173,6 +173,41 @@ button { -webkit-tap-highlight-color: transparent; }
   font-size: 12px;
   font-weight: 750;
 }
+
+/* Previous / next track icons: a triangle plus a bar. */
+.skip-button span {
+  position: relative;
+  width: 12px;
+  height: 12px;
+}
+
+.skip-button span::before,
+.skip-button span::after {
+  content: "";
+  position: absolute;
+  top: 0;
+}
+
+.skip-button span::before {
+  width: 0;
+  height: 0;
+  border-style: solid;
+  border-width: 6px 0 6px 9px;
+  border-color: transparent transparent transparent currentColor;
+}
+
+.skip-button span::after {
+  width: 2px;
+  height: 12px;
+  border-radius: 1px;
+  background: currentColor;
+}
+
+.skip-next span::before { left: 0; }
+.skip-next span::after { right: 0; }
+.skip-previous span { transform: scaleX(-1); }
+.skip-previous span::before { left: 0; }
+.skip-previous span::after { right: 0; }
 
 .play-button {
   position: relative;
@@ -208,6 +243,7 @@ button { -webkit-tap-highlight-color: transparent; }
 
 button:hover { filter: brightness(1.08); }
 button:active { transform: scale(0.96); }
+button:disabled { cursor: default; opacity: 0.4; filter: none; transform: none; }
 
 input[type="range"] {
   width: 100%;
@@ -239,16 +275,20 @@ input[type="range"]::-webkit-slider-thumb {
 }
 
 .lyrics {
+  --lyrics-scale: 1;
   position: relative;
   min-height: 0;
   overflow-y: auto;
   padding: 42% 10px;
   border-radius: 16px;
   background: rgba(16, 18, 20, 0.62);
+  outline: none;
   scroll-behavior: smooth;
   scrollbar-width: thin;
   scrollbar-color: #393d43 transparent;
 }
+
+.lyrics:focus-visible { box-shadow: inset 0 0 0 1px rgba(30, 215, 96, 0.5); }
 
 .lyrics-panel {
   display: grid;
@@ -261,8 +301,48 @@ input[type="range"]::-webkit-slider-thumb {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
   padding: 0 4px;
 }
+
+.lyrics-tools {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tool-group {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 999px;
+  background: var(--surface-2);
+}
+
+.tool-button {
+  min-width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: 999px;
+  padding: 0 6px;
+  color: var(--text);
+  background: transparent;
+  font-size: 11px;
+  font-weight: 750;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.tool-button:hover:not(:disabled) { background: #2f3339; }
+
+.offset-value {
+  min-width: 42px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.offset-value.is-adjusted { color: var(--accent); }
 
 .search-button {
   display: grid;
@@ -364,14 +444,18 @@ input[type="range"]::-webkit-slider-thumb {
 .lyric-line {
   margin: 0;
   padding: 8px 5px;
+  border-radius: 10px;
   color: #6f747c;
-  font-size: 17px;
+  font-size: calc(17px * var(--lyrics-scale, 1));
   font-weight: 680;
   line-height: 1.35;
   text-align: center;
-  transition: color 180ms ease, opacity 180ms ease, transform 180ms ease;
+  transition: color 180ms ease, opacity 180ms ease, transform 180ms ease, background-color 180ms ease;
   opacity: 0.55;
 }
+
+.lyrics.is-synced .lyric-line { cursor: pointer; }
+.lyrics.is-synced .lyric-line:hover { opacity: 0.85; background: rgba(255, 255, 255, 0.04); }
 
 .lyric-line.active {
   color: var(--text);
@@ -379,12 +463,33 @@ input[type="range"]::-webkit-slider-thumb {
   transform: scale(1.035);
 }
 
+.lyrics.is-synced .lyric-line.active:hover { opacity: 1; }
+
 .lyrics-status, .plain-lyrics {
   color: var(--muted);
-  font-size: 14px;
+  font-size: calc(14px * var(--lyrics-scale, 1));
   line-height: 1.65;
   text-align: center;
   white-space: pre-wrap;
 }
 
 .lyrics-status.error { color: var(--danger); }
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 22px;
+  max-width: calc(100% - 40px);
+  padding: 8px 14px;
+  border-radius: 999px;
+  color: var(--text);
+  background: rgba(34, 37, 42, 0.96);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  font-size: 12px;
+  font-weight: 650;
+  text-align: center;
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.toast[hidden] { display: none; }

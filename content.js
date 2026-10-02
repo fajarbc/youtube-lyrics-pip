@@ -14,6 +14,10 @@
   ];
 
   const FAB_SETTINGS_DEFAULTS = { fabCollapsed: false };
+  const METADATA_CHECK_INTERVAL_MS = 500;
+  // Keys the PiP window may read/write through the storage bridge.
+  const PIP_STORAGE_KEY_PATTERN = /^(?:offset|pick|cache):/;
+  const PIP_STORAGE_KEYS = new Set(["lyricsScale", "cacheIndex"]);
 
   let video = null;
   let lastUrl = location.href;
@@ -21,6 +25,7 @@
   let sendTimer = null;
   let urlTimer = null;
   let fullscreenRecheckTimer = null;
+  let metadataCheckTimer = null;
   let mediaMetadataListenersBound = false;
   let activePipBridge = null;
   let extensionInvalidated = false;
@@ -40,6 +45,7 @@
 
     clearTimeout(sendTimer);
     clearTimeout(fullscreenRecheckTimer);
+    clearTimeout(metadataCheckTimer);
     clearInterval(urlTimer);
     observer?.disconnect();
     document.removeEventListener("fullscreenchange", onFullscreenChange);
@@ -139,6 +145,14 @@
     return videoId ? `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg` : "";
   }
 
+  function getVideoId() {
+    try {
+      return new URL(location.href).searchParams.get("v") || "";
+    } catch {
+      return "";
+    }
+  }
+
   function getState() {
     const currentVideo = video || document.querySelector("video");
     const metadata = getMetadata();
@@ -155,6 +169,7 @@
         : 0,
       duration: finiteDuration,
       paused: currentVideo ? currentVideo.paused : true,
+      videoId: getVideoId(),
       url: location.href
     };
   }
@@ -181,6 +196,7 @@
 
   function onVideoEvent(event) {
     sendState(event.type !== "timeupdate");
+    if (event.type !== "timeupdate") updatePipTriggerVisibility();
   }
 
   function bindVideo(nextVideo) {
@@ -231,9 +247,31 @@
     );
   }
 
+  // Only offer the button where there is something to play: a watch page or
+  // the miniplayer on YouTube, and an active track on YouTube Music. This keeps
+  // it off the home feed, search, and channel pages (whose hover previews are
+  // also <video> elements, so "a video exists" is not a usable signal there).
+  function hasPlayableContext() {
+    if (location.hostname === "music.youtube.com") {
+      const currentVideo = video || document.querySelector("video");
+      return Boolean(navigator.mediaSession?.metadata?.title || currentVideo?.currentSrc);
+    }
+
+    if (location.pathname === "/watch" || location.pathname.startsWith("/watch/")) return true;
+    return Boolean(
+      document.querySelector("ytd-app[miniplayer-is-active]") ||
+        document.querySelector("ytd-miniplayer[active]")
+    );
+  }
+
+  function shouldShowPipTrigger() {
+    return hasPlayableContext() && !isFullscreen();
+  }
+
   function updatePipTriggerVisibility() {
     if (!pipTriggerButton) return;
-    pipTriggerButton.style.display = isFullscreen() ? "none" : "inline-flex";
+    const display = shouldShowPipTrigger() ? "inline-flex" : "none";
+    if (pipTriggerButton.style.display !== display) pipTriggerButton.style.display = display;
   }
 
   function onFullscreenChange() {
@@ -359,7 +397,9 @@
 
   function highlightPipTriggerButton() {
     ensurePipTriggerButton();
-    if (!pipTriggerButton) return false;
+    if (!pipTriggerButton) return { ok: false };
+    updatePipTriggerVisibility();
+    if (!hasPlayableContext()) return { ok: false, reason: "no-media" };
 
     pipTriggerButton.scrollIntoView({ behavior: "smooth", block: "center" });
     pipTriggerButton.animate(
@@ -370,7 +410,55 @@
       ],
       { duration: 900, iterations: 2 }
     );
-    return true;
+    return { ok: true };
+  }
+
+  function isAllowedPipStorageKey(key) {
+    return typeof key === "string" && (PIP_STORAGE_KEYS.has(key) || PIP_STORAGE_KEY_PATTERN.test(key));
+  }
+
+  // chrome.storage.local access for the PiP window, which has no extension
+  // APIs of its own. Limited to the lyrics-related keys above.
+  function handlePipStorageRequest(request = {}) {
+    return new Promise((resolve, reject) => {
+      const storage = chrome.storage?.local;
+      if (!storage) {
+        reject(new Error("Extension storage is not available."));
+        return;
+      }
+
+      const done = (result) => {
+        if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
+        else resolve(result ?? null);
+      };
+
+      try {
+        if (request.action === "get" || request.action === "remove") {
+          const keys = Array.isArray(request.keys) ? request.keys : [];
+          if (!keys.length || !keys.every(isAllowedPipStorageKey)) {
+            throw new Error("Storage key not allowed.");
+          }
+          if (request.action === "get") storage.get(keys, done);
+          else storage.remove(keys, () => done(true));
+          return;
+        }
+
+        if (request.action === "set") {
+          const items = request.items && typeof request.items === "object" ? request.items : {};
+          const keys = Object.keys(items);
+          if (!keys.length || !keys.every(isAllowedPipStorageKey)) {
+            throw new Error("Storage key not allowed.");
+          }
+          storage.set(items, () => done(true));
+          return;
+        }
+
+        throw new Error(`Unknown storage action: ${request.action}`);
+      } catch (error) {
+        if (isContextInvalidatedError(error)) handleExtensionInvalidated();
+        reject(error);
+      }
+    });
   }
 
   function createPipBridge(pipWindow, targetTabId) {
@@ -401,6 +489,27 @@
             error: error.message
           });
         }
+        return;
+      }
+
+      if (message.type === "STORAGE_REQUEST") {
+        handlePipStorageRequest(message.payload)
+          .then((response) => {
+            port.postMessage({
+              type: "RUNTIME_RESPONSE",
+              requestId: message.requestId,
+              response,
+              error: null
+            });
+          })
+          .catch((error) => {
+            port.postMessage({
+              type: "RUNTIME_RESPONSE",
+              requestId: message.requestId,
+              response: null,
+              error: error.message
+            });
+          });
       }
     };
 
@@ -408,7 +517,15 @@
 
     return {
       sendInit() {
-        pipWindow.postMessage({ type: "PIP_INIT", targetTabId }, "*", [channel.port2]);
+        pipWindow.postMessage(
+          {
+            type: "PIP_INIT",
+            targetTabId,
+            extensionVersion: chrome.runtime.getManifest?.().version || ""
+          },
+          "*",
+          [channel.port2]
+        );
       },
       forwardBroadcast(message) {
         port.postMessage({ type: "BROADCAST", payload: message });
@@ -505,6 +622,22 @@
     }
   }
 
+  function clickPlayerButton(selectors) {
+    for (const selector of selectors) {
+      const button = document.querySelector(selector);
+      const usable =
+        button &&
+        !button.disabled &&
+        button.getAttribute("aria-disabled") !== "true" &&
+        button.offsetParent !== null;
+      if (usable) {
+        button.click();
+        return true;
+      }
+    }
+    return false;
+  }
+
   async function executeCommand(command, value) {
     discoverVideo();
     if (!video) throw new Error("Could not find the YouTube video element.");
@@ -537,6 +670,31 @@
         }
         break;
       }
+      case "NEXT": {
+        const isMusic = location.hostname === "music.youtube.com";
+        const clicked = clickPlayerButton(
+          isMusic
+            ? ["ytmusic-player-bar .next-button"]
+            : [".html5-video-player .ytp-next-button"]
+        );
+        if (!clicked) throw new Error("There's no next track here.");
+        break;
+      }
+      case "PREV": {
+        // Like most players: restart the song first, go back only near the start.
+        if (video.currentTime > 3) {
+          video.currentTime = 0;
+          break;
+        }
+        const isMusic = location.hostname === "music.youtube.com";
+        const clicked = clickPlayerButton(
+          isMusic
+            ? ["ytmusic-player-bar .previous-button"]
+            : [".html5-video-player .ytp-prev-button"]
+        );
+        if (!clicked) video.currentTime = 0;
+        break;
+      }
       default:
         throw new Error(`Unknown command: ${command}`);
     }
@@ -560,7 +718,7 @@
     }
 
     if (message?.type === "HIGHLIGHT_PIP_BUTTON") {
-      sendResponse({ ok: highlightPipTriggerButton() });
+      sendResponse(highlightPipTriggerButton());
       return;
     }
 
@@ -570,11 +728,23 @@
     }
   });
 
-  const observer = new MutationObserver(() => {
+  // YouTube mutates the DOM constantly (comments, live chat, counters), so
+  // coalesce mutations into at most one metadata check per interval instead
+  // of rebuilding the player state on every single mutation.
+  function runMetadataCheck() {
+    metadataCheckTimer = null;
+    if (extensionInvalidated) return;
     discoverVideo();
     const state = getState();
     const key = `${state.title}|${state.artist}|${state.duration}|${state.url}`;
     if (key !== lastMetadataKey) sendState();
+    ensurePipTriggerButton();
+    updatePipTriggerVisibility();
+  }
+
+  const observer = new MutationObserver(() => {
+    if (metadataCheckTimer !== null) return;
+    metadataCheckTimer = setTimeout(runMetadataCheck, METADATA_CHECK_INTERVAL_MS);
   });
 
   observer.observe(document.documentElement, {
@@ -596,7 +766,11 @@
     if (location.href !== lastUrl) {
       lastUrl = location.href;
       lastMetadataKey = "";
-      setTimeout(() => sendState(true), 500);
+      updatePipTriggerVisibility();
+      setTimeout(() => {
+        sendState(true);
+        updatePipTriggerVisibility();
+      }, 500);
     }
   }, 750);
 
