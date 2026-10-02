@@ -23,6 +23,7 @@
     searchForm: document.getElementById("searchForm"),
     searchInput: document.getElementById("searchInput"),
     searchResults: document.getElementById("searchResults"),
+    closeSearch: document.getElementById("closeSearch"),
     offsetEarlier: document.getElementById("offsetEarlier"),
     offsetLater: document.getElementById("offsetLater"),
     offsetValue: document.getElementById("offsetValue"),
@@ -480,6 +481,7 @@
         } else {
           setLyricsStatus("This result has no lyrics.", true);
         }
+        clearSearchResults();
         closeSearchPanel();
       });
       fragment.appendChild(button);
@@ -547,21 +549,27 @@
     elements.searchResults.replaceChildren();
   }
 
+  // Collapse only: the query and results stay, so the search icon brings
+  // the panel back exactly as it was.
   function closeSearchPanel() {
     if (elements.searchPanel.hidden) return;
     elements.searchPanel.hidden = true;
     elements.searchLyrics.setAttribute("aria-expanded", "false");
-    clearSearchResults();
+  }
+
+  function openSearchPanel() {
+    elements.searchPanel.hidden = false;
+    elements.searchLyrics.setAttribute("aria-expanded", "true");
+    // Fresh search: prefill with the current song. Otherwise resume as left.
+    if (!elements.searchResults.childElementCount) {
+      elements.searchInput.value = [state.title, state.artist].filter(Boolean).join(" ");
+    }
+    elements.searchInput.focus();
   }
 
   function toggleSearchPanel() {
-    const isOpen = !elements.searchPanel.hidden;
-    elements.searchPanel.hidden = isOpen;
-    elements.searchLyrics.setAttribute("aria-expanded", String(!isOpen));
-    if (!isOpen) {
-      elements.searchInput.value = [state.title, state.artist].filter(Boolean).join(" ");
-      elements.searchInput.focus();
-    }
+    if (elements.searchPanel.hidden) openSearchPanel();
+    else closeSearchPanel();
   }
 
   function formatOffset(seconds) {
@@ -629,6 +637,9 @@
     activeLyricIndex = -1;
     resumeAutoscroll();
     elements.lyrics.classList.remove("is-synced");
+    // New song: drop collapsed results from the previous one so the next
+    // open starts fresh with this song prefilled.
+    if (elements.searchPanel.hidden) clearSearchResults();
 
     if (!nextState.title || nextState.title === "Unknown title") {
       setLyricsStatus("Waiting for song metadata…");
@@ -767,6 +778,7 @@
     event.preventDefault();
     runManualSearch();
   });
+  elements.closeSearch?.addEventListener("click", closeSearchPanel);
 
   // Emptying the box (typing it away or the native clear "x") clears results.
   elements.searchInput.addEventListener("input", () => {

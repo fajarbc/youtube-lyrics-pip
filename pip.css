@@ -403,6 +403,16 @@ input[type="range"]::-webkit-slider-thumb {
 
 .search-form input:focus { border-color: var(--accent); }
 
+.search-form .search-close {
+  width: 30px;
+  padding: 0;
+  color: var(--text);
+  background: #3b3f46;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1;
+}
+
 .search-button[aria-expanded="true"] {
   color: #061208;
   background: var(--accent);
